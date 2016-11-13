@@ -15,6 +15,7 @@ require "CombatFloater"
 -- ThisIsMe Module Definition
 -----------------------------------------------------------------------------------------------
 local ThisIsMe = {}
+local LibCommExt = nil
  
 -----------------------------------------------------------------------------------------------
 -- Constants
@@ -311,6 +312,7 @@ function ThisIsMe:OnLoad()
 	self.xmlDoc:RegisterCallback("OnDocLoaded", self)
 	GeminiTimer = Apollo.GetPackage("Gemini:Timer-1.0").tPackage
 	GeminiTimer:Embed(self)
+	LibCommExt = Apollo.GetPackage("LibCommExt-1.0").tPackage
 end
 
 function ThisIsMe:OnDocLoaded()
