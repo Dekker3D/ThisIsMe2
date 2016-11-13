@@ -301,7 +301,9 @@ function ThisIsMe:Init()
 	local bHasConfigureFunction = false
 	local strConfigureButtonText = ""
 	local tDependencies = {
-		"Gemini:Timer-1.0"
+		"Gemini:Timer-1.0",
+		"LibCommExt-1.0",
+		"LibCommExtQueue"
 	}
     Apollo.RegisterAddon(self, bHasConfigureFunction, strConfigureButtonText, tDependencies)
 end
@@ -1310,46 +1312,17 @@ function ThisIsMe:SetupComms()
 	self.startupTimer = ApolloTimer.Create(30, false, "SetupComms", self) -- automatically retry if something goes wrong.
 	
 	if self.Comm ~= nil and self.Comm:IsReady() then
+		if self.startupTimer ~= nil then
+			self.startupTimer:Stop()
+			self.startupTimer = nil
+		end
 		return
 	end
-	self.Comm = ICCommLib.JoinChannel(self.channel, ICCommLib.CodeEnumICCommChannelType.Global)
+	self.Comm = LibCommExt:GetChannel(self.channel)
 	if self.Comm ~= nil then
-		self.Comm:SetJoinResultFunction("OnJoinResult", self)
-		self.Comm:SetReceivedMessageFunction("OnMessageReceived", self)
-		self.Comm:SetSendMessageResultFunction("OnMessageSent", self)
-		self.Comm:SetThrottledFunction("OnMessageThrottled", self)
+		self.Comm:AddReceiveCallback("OnMessageReceived", self)
 	else
 		self:Print(1, "Failed to open channel")
-	end
-end
-
-function ThisIsMe:OnJoinResult(channel, eResult)
-	if self.startupTimer ~= nil then
-		self.startupTimer:Stop()
-		self.startupTimer = nil
-	end
-	
-	if eResult == ICCommLib.CodeEnumICCommJoinResult.Join then
-		self:Print(9, string.format('Joined ICComm Channel "%s"', channel:GetName()))
-		if channel:IsReady() then
-			self:Print(9, 'Channel is ready to transmit')
-		else
-			self:Print(1, 'Channel is not ready to transmit')
-		end
-	elseif eResult == ICCommLib.CodeEnumICCommJoinResult.BadName then
-		self:Print(1, 'Channel ' .. channel .. ' has a bad name.')
-	elseif eResult == ICCommLib.CodeEnumICCommJoinResult.Left then
-		self:Print(1, 'Failed to join channel')
-	elseif eResult == ICCommLib.CodeEnumICCommJoinResult.MissingEntitlement then
-		self:Print(1, 'Failed to join channel')
-	elseif eResult == ICCommLib.CodeEnumICCommJoinResult.NoGroup then
-		self:Print(1, 'Failed to join channel')
-	elseif eResult == ICCommLib.CodeEnumICCommJoinResult.NoGuild then
-		self:Print(1, 'Failed to join channel')
-	elseif eResult == ICCommLib.CodeEnumICCommJoinResult.TooManyChannels then
-		self:Print(1, "You are in too many channels to join the TIM channel")
-	else
-		self:Print(1, 'Failed to join channel; join result: ' .. eResult)
 	end
 end
 
@@ -1767,7 +1740,7 @@ function ThisIsMe:AddBufferedMessage(message, recipient, protocolVersion)
 	end
 end
 
-function ThisIsMe:SendMessage(message, recipient)
+function ThisIsMe:SendMessage(message, recipient, priority)
 	if message == nil then
 		return true
 	end
@@ -1778,18 +1751,20 @@ function ThisIsMe:SendMessage(message, recipient)
 		self:SetupComms()
 		return false
 	end
+	if priority == nil or type(priority) ~= "number" then priority = 0.0 end
+	if self.heartBeatTimer ~= nil then self.heartBeatTimer:Stop() end
+	self.heartBeatTimer = ApolloTimer.Create(60.0, true, "sendHeartbeatMessage", self)
+	
 	if recipient == nil then
-		if self.Comm:SendMessage(message) then
-			self:Print(5, "Message Sent: " .. message)
-			if self.heartBeatTimer ~= nil then self.heartBeatTimer:Stop() end
-			self.heartBeatTimer = ApolloTimer.Create(60.0, true, "sendHeartbeatMessage", self)
-			return true
-		end
+		self.Comm:SendMessage(message, self.options.ProtocolVersion, priority)
+		self:Print(5, "Message Sent: " .. message)
+		if self.heartBeatTimer ~= nil then self.heartBeatTimer:Stop() end
+		self.heartBeatTimer = ApolloTimer.Create(60.0, true, "sendHeartbeatMessage", self)
+		return true
 	else
-		if self.Comm:SendPrivateMessage(recipient, message) then
-			self:Print(5, "Message Sent to " .. recipient .. ": " .. message)
-			return true
-		end
+		self.Comm:SendPrivateMessage(recipient, message, self.options.ProtocolVersion, priority)
+		self:Print(5, "Message Sent to " .. recipient .. ": " .. message)
+		return true
 	end
 	self:Print(5, "Message sending failed: " .. message)
 	return false
@@ -1800,41 +1775,19 @@ end
 ---------------------------------------------------------------------------------------------------
 
 function ThisIsMe:Encode(numToEncode)
-	if numToEncode == nil then
-		return '-'
-	end
-	local b64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-	return b64:sub(numToEncode,numToEncode)
+	return LibCommExt:Encode(numToEncode)
 end
 
 function ThisIsMe:EncodeMore(num, amount)
-	if num == nil or amount == nil then return end
-	num = num - 1
-	local ret = ""
-	for i=1, amount, 1 do
-		ret = ret .. self:Encode((num % 64) + 1)
-		num = num / 64
-	end
-	return ret
+	return LibCommExt:EncodeMore(num, amount)
 end
 
 function ThisIsMe:Decode(charToDecode) 
-	if charToDecode == '-' then
-		return nil
-	end
-	local b64='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-	return string.find(b64, charToDecode,1)
+	return LibCommExt:Decode(charToDecode)
 end
 
-function ThisIsMe:DecodeMore(str)
-	if str == nil then return nil end
-	local num = 0
-	local mult = 1
-	for i=1, str:len(), 1 do
-		num = num + (self:Decode(str:sub(i,i)) - 1) * mult
-		mult = mult * 64
-	end
-	return num + 1
+function ThisIsMe:DecodeMore(str, amount)
+	return LibCommExt:DecodeMore(str, amount)
 end
 
 function ThisIsMe:AllowedProtocolVersion(num)
