@@ -302,8 +302,7 @@ function ThisIsMe:Init()
 	local strConfigureButtonText = ""
 	local tDependencies = {
 		"Gemini:Timer-1.0",
-		"LibCommExt-1.0",
-		"LibCommExtQueue"
+		"LibCommExt-1.0"
 	}
     Apollo.RegisterAddon(self, bHasConfigureFunction, strConfigureButtonText, tDependencies)
 end
@@ -1305,6 +1304,10 @@ function ThisIsMe:CheckComms()
 	self:SetupComms()
 end
 
+function ThisIsMe:EchoReceivedMessage(channel, strMessage, strSender)
+	self.Comm:OnMessageReceived(channel, strMessage, strSender)
+end
+
 function ThisIsMe:SetupComms()
 	if self.startupTimer ~= nil then
 		return
@@ -1321,6 +1324,7 @@ function ThisIsMe:SetupComms()
 	self.Comm = LibCommExt:GetChannel(self.channel)
 	if self.Comm ~= nil then
 		self.Comm:AddReceiveCallback("OnMessageReceived", self)
+		self.Comm:SetReceiveEcho("EchoReceivedMessage", self)
 	else
 		self:Print(1, "Failed to open channel")
 	end
